@@ -1,0 +1,183 @@
+Script 1 (RPi):
+
+
+import io
+import socket
+import struct
+import time
+import picamera
+import cv2
+import numpy as np
+import RPi.GPIO as GPIO
+import time
+from AlphaBot2 import AlphaBot2
+from imutils.video import VideoStream
+from imutils.video import FPS
+import imutils
+import pickle
+import threading
+from threading import Thread
+
+Ab = AlphaBot2()
+BUZ = 4
+
+CODE_DICT = {'0':'.','1':'-','2':'--','3':'---','4':'.--','5':'..-','6':'...','7':'-..','8':'--.','9':'.-','10':'-.'}
+
+def encrypt(message):
+
+    if message[0] == '1':
+        code = CODE_DICT[message[2]]
+    elif message[0] == '0':
+        code = ''
+    else:
+        code = '..'
+    robot_beep(code)
+    
+def robot_beep(code)   
+    for i in code:
+        if code[i] == '.':
+            beep_on()
+            time.sleep(0.25)
+            beep_off()
+        elif code[i] == '-':
+            beep_on()
+            time_sleep(0.5)
+            beep_off
+        elif code == '':
+            beep_off()
+
+def beep_on():
+    GPIO.output(BUZ,GPIO.HIGH)
+def beep_off():
+    GPIO.output(BUZ,GPIO.LOW)
+
+def robotMOVE():
+    
+    t = threading.currentThread()
+    t.do_run = True
+    
+    DR = 16
+    DL = 19
+    
+    
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setwarnings(False)
+    GPIO.setup(DR,GPIO.IN,GPIO.PUD_UP)
+    GPIO.setup(DL,GPIO.IN,GPIO.PUD_UP)
+    GPIO.setup(BUZ,GPIO.OUT)
+
+
+    while True:
+        while getattr(t, "do_run", True):
+            DR_status = GPIO.input(DR)
+            DL_status = GPIO.input(DL)
+            if((DL_status == 0)):
+                Ab.left()
+                time.sleep(0.002)
+                Ab.stop()
+            
+            elif((DR_status == 0)):
+                Ab.right()
+                time.sleep(0.002)
+                Ab.stop()
+            
+            else:
+                Ab.forward()
+                time.sleep(1)
+                Ab.left()
+                time.sleep(1)
+                Ab.right()
+                time.sleep(1)
+                Ab.stop()
+        
+        
+        
+def robotMOVE2(centerX,faceX):
+
+
+    if centerX > faceX:
+        Ab.right()
+        time.sleep(0.1)
+        Ab.stop()
+    elif centerX < faceX:
+        Ab.left()
+        time.sleep(0.1)
+        Ab.stop()
+
+    
+def humanDet(img):
+    
+
+    faceCascade = cv2.CascadeClassifier('/home/pi/opencv/data/haarcascades/haarcascade_frontalface_default.xml')
+    img = cv2.flip(img, 1)
+    
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    (H, W) = img.shape[:2]
+    
+    centerX = W // 2
+    centerY = H // 2
+    
+    faces = faceCascade.detectMultiScale(
+        gray,     
+        scaleFactor=1.2,
+        minNeighbors=5,     
+        minSize=(20, 20)
+    )
+    for (x,y,w,h) in faces:
+        cv2.rectangle(img,(x,y),(x+w,y+h),(255,0,0),2)
+        roi_gray = gray[y:y+h, x:x+w]
+        roi_color = img[y:y+h, x:x+w]
+        
+    cv2.imshow('video',img)
+    if len(faces) != 0:
+        faceX = int(x + (w / 2.0))
+        print(faceX)
+        robotMOVE2(centerX,faceX)
+
+
+def main():
+    
+    
+    
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    port = 8200
+    server_socket.bind(('192.168.1.100', port))
+    server_socket.listen(3)
+    
+    morse2= ''
+    # Socket Accept
+    while True:
+        client_socket,addr = server_socket.accept()
+        print('GOT CONNECTION FROM:',addr)
+        if client_socket:
+            
+            vid = cv2.VideoCapture(0)
+            
+            while(vid.isOpened()):
+                img,frame = vid.read()
+                frame = imutils.resize(frame,width=320)
+                a = pickle.dumps(frame)
+                message = struct.pack("Q",len(a))+a
+                client_socket.sendall(message)
+                
+                cv2.imshow('TRANSMITTING VIDEO',frame)
+                
+                message = pickle.loads(client_socket.recv(4096))
+                encrypt(message)
+
+                if message.count('0') > 1:
+                    t.do_run = False
+                    humanDet(frame)
+                    
+                elif message.count('0') == 1 :
+                    t.do_run = True
+                    
+                key = cv2.waitKey(1) & 0xFF    
+                if key ==ord('q'):
+                    client_socket.close()
+                    
+
+if __name__ == '__main__':
+    t = threading.Thread(target=robotMOVE)
+    t.start()
+    main()
